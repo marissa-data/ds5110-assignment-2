@@ -1,2 +1,5 @@
 .ssh/
 .cache/
+frontend/config.json
+__pycache__/
+*.pyc

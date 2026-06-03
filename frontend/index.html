@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IMDb Sentiment Analysis</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>IMDb Sentiment Analysis</h1>
+    <p class="subtitle">DistilBERT · AWS Lambda · DS5110</p>
+  </header>
+
+  <main>
+    <!-- Step 1: Upload -->
+    <section class="card" id="section-upload">
+      <div class="step-label">Step 1</div>
+      <h2>Upload Dataset</h2>
+      <div id="drop-zone" class="drop-zone" role="button" tabindex="0"
+           aria-label="Upload dataset file">
+        <div class="drop-icon">&#8679;</div>
+        <p class="drop-primary">Drop your file here or <span class="link">click to browse</span></p>
+        <p class="drop-hint">Supports <strong>.csv</strong> and <strong>.parquet</strong> &mdash; must contain a <code>text</code> column</p>
+        <input type="file" id="file-input" accept=".csv,.parquet" hidden />
+      </div>
+      <div id="file-info" class="file-info hidden">
+        <span id="file-name"></span>
+        <span id="file-size" class="muted"></span>
+        <button id="btn-clear-file" class="btn-icon" aria-label="Remove file">&#x2715;</button>
+      </div>
+    </section>
+
+    <!-- Step 2: Configure -->
+    <section class="card" id="section-config">
+      <div class="step-label">Step 2</div>
+      <h2>Configure</h2>
+      <div class="config-row">
+        <label for="shard-size-select">Reviews per shard</label>
+        <select id="shard-size-select">
+          <option value="100">100 &mdash; max parallelism (10 shards per 1k rows)</option>
+          <option value="200" selected>200 &mdash; balanced (5 shards per 1k rows)</option>
+          <option value="300">300 &mdash; moderate (4 shards per 1k rows)</option>
+          <option value="400">400 &mdash; fewer invocations (3 shards per 1k rows)</option>
+          <option value="500">500 &mdash; min invocations (2 shards per 1k rows)</option>
+        </select>
+      </div>
+      <p class="config-hint">
+        Concurrency limit: <strong>5 workers</strong> max. Large datasets are always capped at 20 shards total.
+      </p>
+    </section>
+
+    <!-- Run button -->
+    <div class="run-row">
+      <button id="btn-start" class="btn-primary" disabled>
+        Start Sentiment Analysis
+      </button>
+      <span id="run-error" class="error-msg hidden"></span>
+    </div>
+
+    <!-- Step 3: Progress -->
+    <section class="card hidden" id="section-progress">
+      <div class="step-label">Step 3</div>
+      <h2>Processing</h2>
+      <div class="progress-meta">
+        <span>Job: <code id="job-id-display">—</code></span>
+        <span id="status-badge" class="badge badge-processing">processing</span>
+      </div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-track">
+          <div id="progress-bar-fill" class="progress-bar-fill" style="width:0%"></div>
+        </div>
+        <span id="progress-pct">0%</span>
+      </div>
+      <p id="progress-detail" class="muted">Waiting for workers…</p>
+    </section>
+
+    <!-- Step 4: Results -->
+    <section class="card hidden" id="section-results">
+      <div class="step-label">Step 4</div>
+      <h2>Results</h2>
+      <div class="results-grid">
+        <div class="result-stat">
+          <div class="stat-value" id="res-total">—</div>
+          <div class="stat-label">Total reviews</div>
+        </div>
+        <div class="result-stat positive">
+          <div class="stat-value" id="res-positive">—</div>
+          <div class="stat-label">Positive</div>
+        </div>
+        <div class="result-stat negative">
+          <div class="stat-value" id="res-negative">—</div>
+          <div class="stat-label">Negative</div>
+        </div>
+        <div class="result-stat accuracy hidden" id="stat-accuracy">
+          <div class="stat-value" id="res-accuracy">—</div>
+          <div class="stat-label">Accuracy</div>
+        </div>
+      </div>
+      <div class="sentiment-bar-wrap" id="sentiment-bar-wrap" hidden>
+        <div id="sentiment-bar-pos" class="sentiment-seg seg-pos" style="width:50%">
+          <span id="sentiment-bar-pos-label">50%</span>
+        </div>
+        <div id="sentiment-bar-neg" class="sentiment-seg seg-neg" style="width:50%">
+          <span id="sentiment-bar-neg-label">50%</span>
+        </div>
+      </div>
+      <button id="btn-new-job" class="btn-secondary">Analyse Another File</button>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

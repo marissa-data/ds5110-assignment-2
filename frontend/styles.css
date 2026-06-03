@@ -1,0 +1,246 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #f0f2f5;
+  --surface:   #ffffff;
+  --navy:      #16213e;
+  --navy-dark: #0f1b35;
+  --accent:    #2563eb;
+  --pos:       #16a34a;
+  --neg:       #dc2626;
+  --muted:     #6b7280;
+  --border:    #e5e7eb;
+  --radius:    10px;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: #111827;
+  min-height: 100vh;
+}
+
+/* ── Header ── */
+header {
+  background: var(--navy);
+  color: #fff;
+  padding: 1.25rem 2rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+header h1 { font-size: 1.4rem; font-weight: 700; }
+.subtitle  { font-size: .8rem; color: #93c5fd; margin-top: .2rem; letter-spacing: .04em; }
+
+/* ── Layout ── */
+main {
+  max-width: 760px;
+  margin: 2rem auto;
+  padding: 0 1rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* ── Cards ── */
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  box-shadow: 0 1px 4px rgba(0,0,0,.1);
+}
+.step-label {
+  font-size: .7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--accent);
+  margin-bottom: .35rem;
+}
+.card h2 { font-size: 1.05rem; margin-bottom: 1rem; }
+
+/* ── Drop zone ── */
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+}
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--accent);
+  background: #eff6ff;
+}
+.drop-icon  { font-size: 2.5rem; color: var(--accent); margin-bottom: .5rem; }
+.drop-primary { font-size: .95rem; margin-bottom: .4rem; }
+.drop-hint  { font-size: .8rem; color: var(--muted); }
+.link       { color: var(--accent); text-decoration: underline; }
+
+code {
+  background: #f3f4f6;
+  border-radius: 3px;
+  padding: .05em .3em;
+  font-size: .85em;
+  font-family: monospace;
+}
+
+/* ── File info ── */
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin-top: .75rem;
+  padding: .6rem .85rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  font-size: .875rem;
+}
+#file-name  { font-weight: 600; flex: 1; word-break: break-all; }
+.muted      { color: var(--muted); font-size: .82rem; }
+.btn-icon   {
+  background: none; border: none; cursor: pointer;
+  color: var(--muted); font-size: 1rem; padding: .15rem .3rem;
+  border-radius: 4px; line-height: 1;
+}
+.btn-icon:hover { background: #fee2e2; color: var(--neg); }
+
+/* ── Config ── */
+.config-row {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+.config-row label { font-size: .875rem; font-weight: 600; }
+select {
+  padding: .55rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: .9rem;
+  background: var(--surface);
+  cursor: pointer;
+}
+select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.config-hint { margin-top: .75rem; font-size: .8rem; color: var(--muted); }
+
+/* ── Run button ── */
+.run-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: .7rem 1.8rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s, opacity .2s;
+}
+.btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+.btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+.btn-secondary {
+  background: none;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+  border-radius: 7px;
+  padding: .55rem 1.4rem;
+  font-size: .9rem;
+  cursor: pointer;
+  transition: background .2s;
+  margin-top: 1.25rem;
+}
+.btn-secondary:hover { background: #eff6ff; }
+.error-msg { color: var(--neg); font-size: .88rem; }
+
+/* ── Progress ── */
+.progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .75rem;
+  font-size: .875rem;
+}
+.badge {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: .2rem .55rem;
+  border-radius: 99px;
+}
+.badge-processing { background: #dbeafe; color: #1d4ed8; }
+.badge-completed  { background: #dcfce7; color: #15803d; }
+.badge-failed     { background: #fee2e2; color: #b91c1c; }
+
+.progress-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin-bottom: .5rem;
+}
+.progress-bar-track {
+  flex: 1;
+  height: 10px;
+  background: #e5e7eb;
+  border-radius: 99px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+  transition: width .4s ease;
+}
+#progress-pct { font-size: .875rem; font-weight: 600; min-width: 3rem; text-align: right; }
+#progress-detail { font-size: .82rem; }
+
+/* ── Results ── */
+.results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.result-stat {
+  text-align: center;
+  padding: 1rem .5rem;
+  border-radius: 8px;
+  background: #f9fafb;
+  border: 1px solid var(--border);
+}
+.result-stat.positive { background: #f0fdf4; border-color: #bbf7d0; }
+.result-stat.negative { background: #fff1f2; border-color: #fecdd3; }
+.result-stat.accuracy { background: #fefce8; border-color: #fde68a; }
+.stat-value { font-size: 1.6rem; font-weight: 800; margin-bottom: .2rem; }
+.result-stat.positive .stat-value { color: var(--pos); }
+.result-stat.negative .stat-value { color: var(--neg); }
+.result-stat.accuracy .stat-value { color: #b45309; }
+.stat-label { font-size: .75rem; color: var(--muted); text-transform: uppercase;
+              letter-spacing: .05em; font-weight: 600; }
+
+/* ── Sentiment bar ── */
+.sentiment-bar-wrap {
+  display: flex;
+  height: 28px;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 1.25rem;
+}
+.sentiment-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: .78rem;
+  font-weight: 700;
+  color: #fff;
+  transition: width .5s ease;
+}
+.seg-pos { background: var(--pos); }
+.seg-neg { background: var(--neg); }
+
+/* ── Utilities ── */
+.hidden { display: none !important; }
