@@ -1,12 +1,15 @@
 """
 Coordinator Lambda — orchestrates upload, sharding, worker dispatch, and result aggregation.
 
+Progress is S3 object-based: counting files in outputs/{job_id}/timing/ avoids
+concurrent writes to a shared metadata object (which would cause race conditions).
+
 Routes:
   POST /upload-url      — presigned S3 PUT URL for direct browser upload
-  POST /job/start       — shard the uploaded file, dispatch first worker batch
-  GET  /job/status      — job progress (completed_shards / total_shards)
-  GET  /job/results     — aggregate sentiment + accuracy from all shard outputs
-  POST /job/worker-done — worker callback; dispatches next pending shard
+  POST /job/start       — shard file, write metadata, dispatch first worker batch
+  GET  /job/status      — S3-counted progress + per-shard timing for the dashboard
+  GET  /job/results     — aggregate sentiment + accuracy from per-review records
+  POST /job/worker-done — concurrency management only (dispatch next pending shard)
 """
 
 import csv
@@ -21,7 +24,7 @@ import boto3
 s3  = boto3.client("s3")
 lam = boto3.client("lambda")
 
-DATA_BUCKET   = os.environ["DATA_BUCKET"]
+DATA_BUCKET     = os.environ["DATA_BUCKET"]
 WORKER_FUNCTION = os.environ["WORKER_FUNCTION"]
 MAX_CONCURRENCY = 5
 MAX_SHARDS      = 20
@@ -77,8 +80,7 @@ def _start_job(body):
     if not job_id or not s3_key:
         return _err(400, "job_id and s3_key are required")
 
-    # Shard size — clamp to [MIN, MAX] then further enforce MAX_SHARDS cap later
-    requested = int(body.get("shard_size", int(os.environ.get("SHARD_SIZE", "200"))))
+    requested  = int(body.get("shard_size", int(os.environ.get("SHARD_SIZE", "200"))))
     shard_size = max(MIN_SHARD_SIZE, min(MAX_SHARD_SIZE, requested))
 
     try:
@@ -87,7 +89,6 @@ def _start_job(body):
     except Exception as exc:
         return _err(400, f"Cannot read uploaded file: {exc}")
 
-    # Parse based on file extension
     ext = s3_key.rsplit(".", 1)[-1].lower() if "." in s3_key else "csv"
     try:
         if ext == "parquet":
@@ -100,9 +101,7 @@ def _start_job(body):
     if not rows:
         return _err(400, "File has no data rows")
 
-    has_label = "label" in rows[0]
-
-    # Enforce MAX_SHARDS: if shard_size would exceed cap, increase it
+    has_label      = "label" in rows[0]
     effective_size = max(shard_size, -(-len(rows) // MAX_SHARDS))
 
     shard_ids = []
@@ -117,17 +116,15 @@ def _start_job(body):
     pending     = shard_ids[MAX_CONCURRENCY:]
 
     meta = {
-        "job_id":           job_id,
-        "status":           "processing",
-        "total_shards":     total,
-        "completed_shards": 0,
-        "pending_shards":   pending,
-        "running_shards":   first_batch,
-        "has_label":        has_label,
-        "shard_size":       effective_size,
-        "total_rows":       len(rows),
-        "created_at":       _now(),
-        "updated_at":       _now(),
+        "job_id":         job_id,
+        "total_shards":   total,
+        "pending_shards": pending,
+        "running_shards": first_batch,
+        "has_label":      has_label,
+        "shard_size":     effective_size,
+        "total_rows":     len(rows),
+        "created_at":     _now(),
+        "updated_at":     _now(),
     }
     _write_meta(job_id, meta)
 
@@ -148,16 +145,39 @@ def _job_status(qs):
     meta = _read_meta(qs.get("job_id"))
     if meta is None:
         return _err(404, "Job not found")
-    total = meta["total_shards"]
-    done  = meta["completed_shards"]
+
+    total  = meta["total_shards"]
+    job_id = meta["job_id"]
+
+    # S3-based progress: count timing files written by workers.
+    # Each worker writes exactly one timing file when it finishes,
+    # so completed = number of timing files present.
+    shards_info = []
+    prefix = f"outputs/{job_id}/timing/"
+    pager  = s3.get_paginator("list_objects_v2")
+    for page in pager.paginate(Bucket=DATA_BUCKET, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            try:
+                data = json.loads(
+                    s3.get_object(Bucket=DATA_BUCKET, Key=obj["Key"])["Body"].read()
+                )
+                shards_info.append(data)
+            except Exception:
+                pass
+
+    shards_info.sort(key=lambda x: x.get("shard_id", 0))
+    completed = len(shards_info)
+    status    = "completed" if completed >= total else "processing"
+
     return _ok({
-        "job_id":           meta["job_id"],
-        "status":           meta["status"],
+        "job_id":           job_id,
+        "status":           status,
         "total_shards":     total,
-        "completed_shards": done,
-        "progress_pct":     round(done / max(total, 1) * 100, 1),
+        "completed_shards": completed,
+        "progress_pct":     round(completed / max(total, 1) * 100, 1),
         "total_rows":       meta.get("total_rows", 0),
         "has_label":        meta.get("has_label", False),
+        "shards":           shards_info,
     })
 
 
@@ -167,25 +187,30 @@ def _job_results(qs):
         return _err(404, "Job not found")
 
     positive = negative = total = correct = total_labeled = 0
-    prefix   = f"outputs/{meta['job_id']}/"
+    prefix   = f"outputs/{meta['job_id']}/records/"
     pager    = s3.get_paginator("list_objects_v2")
     for page in pager.paginate(Bucket=DATA_BUCKET, Prefix=prefix):
         for obj in page.get("Contents", []):
             try:
-                r = json.loads(
+                records = json.loads(
                     s3.get_object(Bucket=DATA_BUCKET, Key=obj["Key"])["Body"].read()
                 )
-                positive      += r.get("positive", 0)
-                negative      += r.get("negative", 0)
-                total         += r.get("total", 0)
-                correct       += r.get("correct", 0)
-                total_labeled += r.get("total_labeled", 0)
+                for rec in records:
+                    total += 1
+                    if rec.get("predicted_label_name") == "POSITIVE":
+                        positive += 1
+                    else:
+                        negative += 1
+                    if "correct" in rec:
+                        total_labeled += 1
+                        if rec["correct"]:
+                            correct += 1
             except Exception:
                 pass
 
     result = {
         "job_id":       meta["job_id"],
-        "status":       meta["status"],
+        "status":       "completed",
         "positive":     positive,
         "negative":     negative,
         "total":        total,
@@ -200,6 +225,7 @@ def _job_results(qs):
 
 
 def _worker_done(body):
+    """Concurrency management only — does not track progress."""
     job_id   = body.get("job_id")
     shard_id = body.get("shard_id")
     if not job_id or shard_id is None:
@@ -212,7 +238,6 @@ def _worker_done(body):
     running = meta.get("running_shards", [])
     if shard_id in running:
         running.remove(shard_id)
-    meta["completed_shards"] = meta.get("completed_shards", 0) + 1
 
     pending      = meta.get("pending_shards", [])
     callback_url = os.environ.get("API_CALLBACK_URL", "")
@@ -224,10 +249,6 @@ def _worker_done(body):
     meta["running_shards"] = running
     meta["pending_shards"] = pending
     meta["updated_at"]     = _now()
-
-    if meta["completed_shards"] >= meta["total_shards"]:
-        meta["status"] = "completed"
-
     _write_meta(job_id, meta)
     return _ok({"ok": True})
 
@@ -270,9 +291,9 @@ def _parse_parquet(content_bytes):
 # ── S3 helpers ────────────────────────────────────────────────────────────────
 
 def _write_shard(job_id, shard_id, rows, has_label):
-    buf = io.StringIO()
+    buf    = io.StringIO()
     fields = ["text", "label"] if has_label else ["text"]
-    w = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
+    w      = csv.DictWriter(buf, fieldnames=fields, extrasaction="ignore")
     w.writeheader()
     w.writerows(rows)
     s3.put_object(
@@ -289,7 +310,8 @@ def _invoke_worker(job_id, shard_id, callback_url):
         "shard_id":     shard_id,
         "data_bucket":  DATA_BUCKET,
         "shard_key":    f"shards/{job_id}/shard_{shard_id:04d}.csv",
-        "output_key":   f"outputs/{job_id}/shard_{shard_id:04d}.json",
+        "records_key":  f"outputs/{job_id}/records/shard_{shard_id:04d}.json",
+        "timing_key":   f"outputs/{job_id}/timing/shard_{shard_id:04d}.json",
         "callback_url": callback_url,
     }
     lam.invoke(
@@ -334,7 +356,8 @@ def _now():
 def _ok(body):
     return {
         "statusCode": 200,
-        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        "headers": {"Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*"},
         "body": json.dumps(body),
     }
 
@@ -342,6 +365,7 @@ def _ok(body):
 def _err(code, msg):
     return {
         "statusCode": code,
-        "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+        "headers": {"Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*"},
         "body": json.dumps({"error": msg}),
     }

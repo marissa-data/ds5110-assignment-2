@@ -66,6 +66,11 @@
         <span>Job: <code id="job-id-display">—</code></span>
         <span id="status-badge" class="badge badge-processing">processing</span>
       </div>
+      <div class="workers-row">
+        <span class="workers-label">Workers complete:</span>
+        <strong><span id="workers-done">0</span> / <span id="workers-total">—</span></strong>
+        <span class="elapsed-inline">Elapsed: <span id="elapsed-time">0:00</span></span>
+      </div>
       <div class="progress-bar-wrap">
         <div class="progress-bar-track">
           <div id="progress-bar-fill" class="progress-bar-fill" style="width:0%"></div>
@@ -75,10 +80,47 @@
       <p id="progress-detail" class="muted">Waiting for workers…</p>
     </section>
 
+    <!-- Coordinator Timing -->
+    <section class="card hidden" id="section-timing">
+      <h2>Coordinator Timing</h2>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Request</th>
+              <th class="col-num">Duration</th>
+              <th class="col-ts">Timestamp</th>
+            </tr>
+          </thead>
+          <tbody id="coord-timing-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Shard Log -->
+    <section class="card hidden" id="section-shard-log">
+      <h2>Shard Results <span id="shard-log-count" class="muted small"></span></h2>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="col-num">Shard</th>
+              <th class="col-num">Reviews</th>
+              <th class="col-num">Positive</th>
+              <th class="col-num">Negative</th>
+              <th class="col-num" id="col-accuracy-hdr">Accuracy</th>
+              <th class="col-num">Worker Time</th>
+            </tr>
+          </thead>
+          <tbody id="shard-log-body"></tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- Step 4: Results -->
     <section class="card hidden" id="section-results">
       <div class="step-label">Step 4</div>
-      <h2>Results</h2>
+      <h2>Summary</h2>
       <div class="results-grid">
         <div class="result-stat">
           <div class="stat-value" id="res-total">—</div>
@@ -105,6 +147,34 @@
           <span id="sentiment-bar-neg-label">50%</span>
         </div>
       </div>
+
+      <!-- Timing summary -->
+      <div class="timing-summary">
+        <h3>Timing Summary</h3>
+        <div class="timing-stats-grid">
+          <div class="timing-stat">
+            <div class="ts-value" id="res-elapsed">—</div>
+            <div class="ts-label">Total Elapsed</div>
+          </div>
+          <div class="timing-stat">
+            <div class="ts-value" id="res-worker-avg">—</div>
+            <div class="ts-label">Avg Worker</div>
+          </div>
+          <div class="timing-stat">
+            <div class="ts-value" id="res-worker-min">—</div>
+            <div class="ts-label">Min Worker</div>
+          </div>
+          <div class="timing-stat">
+            <div class="ts-value" id="res-worker-max">—</div>
+            <div class="ts-label">Max Worker</div>
+          </div>
+          <div class="timing-stat">
+            <div class="ts-value" id="res-coord-avg">—</div>
+            <div class="ts-label">Avg Coord Req</div>
+          </div>
+        </div>
+      </div>
+
       <button id="btn-new-job" class="btn-secondary">Analyse Another File</button>
     </section>
   </main>

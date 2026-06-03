@@ -1,12 +1,10 @@
 """
-Worker Lambda — DistilBERT sentiment analysis via ONNX Runtime.
+Worker Lambda — DistilBERT sentiment analysis (dfurman/distilbert-base-uncased-imdb).
+Option B: model downloaded from Hugging Face at runtime, cached in /tmp.
 
-Each invocation:
-  1. Downloads model files from S3 to /tmp on cold start (cached for warm calls).
-  2. Reads one shard CSV (columns: text, optionally label).
-  3. Runs batched DistilBERT inference.
-  4. Writes {positive, negative, total, [correct, total_labeled]} JSON output.
-  5. POSTs job_id + shard_id back to the coordinator callback URL.
+Writes two S3 objects per shard:
+  outputs/{job_id}/records/shard_XXXX.json  — per-review records (for results endpoint)
+  outputs/{job_id}/timing/shard_XXXX.json   — timing + summary (for status polling)
 """
 
 import csv
@@ -14,23 +12,18 @@ import io
 import json
 import os
 import urllib.request
+from datetime import datetime, timezone
 
 import boto3
-import numpy as np
-import onnxruntime as ort
-from tokenizers import Tokenizer
+from transformers import pipeline
 
-MODEL_DIR   = "/tmp/model"
-MODEL_FILES = ["model.onnx", "tokenizer.json", "config.json"]
-BATCH_SIZE  = 16
-MAX_LENGTH  = 512
+MODEL_ID   = "dfurman/distilbert-base-uncased-imdb"
+MODEL_DIR  = "/tmp/model"
+BATCH_SIZE = 8
+MAX_LENGTH = 256
 
-# Module-level cache — populated once per execution environment
-_tokenizer: Tokenizer | None = None
-_session:   ort.InferenceSession | None = None
-_id2label:  dict | None = None
-
-s3 = boto3.client("s3")
+_pipe = None
+s3    = boto3.client("s3")
 
 
 def lambda_handler(event, context):
@@ -38,115 +31,120 @@ def lambda_handler(event, context):
     shard_id     = event["shard_id"]
     data_bucket  = event["data_bucket"]
     shard_key    = event["shard_key"]
-    output_key   = event["output_key"]
+    records_key  = event["records_key"]
+    timing_key   = event["timing_key"]
     callback_url = event.get("callback_url", "")
 
-    _ensure_model(data_bucket)
+    start_dt = datetime.now(timezone.utc)
+    _ensure_model()
 
     obj     = s3.get_object(Bucket=data_bucket, Key=shard_key)
     content = obj["Body"].read().decode("utf-8", errors="replace")
     rows    = list(csv.DictReader(io.StringIO(content)))
 
     if not rows:
-        _write_result(data_bucket, output_key, 0, 0, 0, 0, 0)
+        end_dt = datetime.now(timezone.utc)
+        _write_records(data_bucket, records_key, [])
+        _write_timing(data_bucket, timing_key, shard_id, start_dt, end_dt, 0, 0, 0, 0, 0)
         _notify(callback_url, job_id, shard_id)
         return {"job_id": job_id, "shard_id": shard_id, "total": 0}
 
     has_label = "label" in rows[0]
     texts     = [row.get("text", "") for row in rows]
 
-    # Batched inference
-    positive = negative = 0
-    predictions = []
-    for i in range(0, len(texts), BATCH_SIZE):
-        batch  = texts[i : i + BATCH_SIZE]
-        preds  = _infer(batch)
-        predictions.extend(preds)
-        for pred in preds:
-            label = _id2label.get(str(pred), "NEGATIVE")
-            if label == "POSITIVE":
-                positive += 1
-            else:
-                negative += 1
+    raw_results = _pipe(
+        texts,
+        batch_size=BATCH_SIZE,
+        truncation=True,
+        max_length=MAX_LENGTH,
+    )
 
-    # Accuracy — only if ground-truth labels are present
-    correct = total_labeled = 0
-    if has_label:
-        for row, pred in zip(rows, predictions):
-            raw = row.get("label", "")
-            if raw == "":
-                continue
-            try:
-                gt = int(raw)          # 0 = NEGATIVE, 1 = POSITIVE
-            except ValueError:
-                continue
-            total_labeled += 1
-            pred_binary = 1 if _id2label.get(str(pred), "NEGATIVE") == "POSITIVE" else 0
-            if pred_binary == gt:
-                correct += 1
+    label_to_int = {"POSITIVE": 1, "NEGATIVE": 0}
+    records  = []
+    positive = negative = correct = total_labeled = 0
 
-    total = len(rows)
-    _write_result(data_bucket, output_key, positive, negative, total,
-                  correct, total_labeled)
+    for row, res in zip(rows, raw_results):
+        label_name = res["label"]
+        label_int  = label_to_int.get(label_name, -1)
+        if label_name == "POSITIVE":
+            positive += 1
+        else:
+            negative += 1
+
+        record = {
+            "input_text_prefix":    row.get("text", "")[:200],
+            "predicted_label":      label_int,
+            "predicted_label_name": label_name,
+            "score":                round(res["score"], 6),
+        }
+        if has_label:
+            raw_gt = row.get("label", "")
+            if raw_gt != "":
+                try:
+                    gt = int(raw_gt)
+                    record["ground_truth_label"] = gt
+                    record["correct"] = (label_int == gt)
+                    total_labeled += 1
+                    if label_int == gt:
+                        correct += 1
+                except ValueError:
+                    pass
+        records.append(record)
+
+    end_dt = datetime.now(timezone.utc)
+    _write_records(data_bucket, records_key, records)
+    _write_timing(data_bucket, timing_key, shard_id, start_dt, end_dt,
+                  len(records), positive, negative, correct, total_labeled)
     _notify(callback_url, job_id, shard_id)
 
-    return {
-        "job_id": job_id, "shard_id": shard_id,
-        "positive": positive, "negative": negative, "total": total,
-        "correct": correct, "total_labeled": total_labeled,
-    }
+    return {"job_id": job_id, "shard_id": shard_id, "total": len(records)}
 
 
 # ── Model management ──────────────────────────────────────────────────────────
 
-def _ensure_model(data_bucket):
-    global _tokenizer, _session, _id2label
-    if _session is not None:
+def _ensure_model():
+    global _pipe
+    if _pipe is not None:
         return
-
+    print(f"Loading model {MODEL_ID} into {MODEL_DIR} …")
     os.makedirs(MODEL_DIR, exist_ok=True)
-    for fname in MODEL_FILES:
-        dest = os.path.join(MODEL_DIR, fname)
-        if not os.path.exists(dest):
-            print(f"Downloading model/{fname} …")
-            s3.download_file(data_bucket, f"model/{fname}", dest)
+    _pipe = pipeline(
+        "text-classification",
+        model=MODEL_ID,
+        device=-1,
+        model_kwargs={"cache_dir": MODEL_DIR},
+    )
+    print("Model loaded.")
 
-    _tokenizer = Tokenizer.from_file(os.path.join(MODEL_DIR, "tokenizer.json"))
-    _tokenizer.enable_truncation(max_length=MAX_LENGTH)
-    _tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
 
-    opts = ort.SessionOptions()
-    opts.intra_op_num_threads = int(os.environ.get("ORT_THREADS", "2"))
-    _session = ort.InferenceSession(
-        os.path.join(MODEL_DIR, "model.onnx"),
-        sess_options=opts,
-        providers=["CPUExecutionProvider"],
+# ── S3 helpers ────────────────────────────────────────────────────────────────
+
+def _write_records(bucket, key, records):
+    s3.put_object(
+        Bucket=bucket, Key=key,
+        Body=json.dumps(records).encode(),
+        ContentType="application/json",
     )
 
-    with open(os.path.join(MODEL_DIR, "config.json")) as f:
-        cfg = json.load(f)
-    _id2label = cfg.get("id2label", {"0": "NEGATIVE", "1": "POSITIVE"})
-    print("Model loaded. id2label:", _id2label)
 
-
-def _infer(texts):
-    encodings      = _tokenizer.encode_batch(texts)
-    input_ids      = np.array([e.ids            for e in encodings], dtype=np.int64)
-    attention_mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)
-    logits = _session.run(
-        ["logits"],
-        {"input_ids": input_ids, "attention_mask": attention_mask},
-    )[0]
-    return np.argmax(logits, axis=1).tolist()
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _write_result(bucket, key, positive, negative, total, correct, total_labeled):
-    result = {"positive": positive, "negative": negative, "total": total,
-              "correct": correct, "total_labeled": total_labeled}
-    s3.put_object(Bucket=bucket, Key=key,
-                  Body=json.dumps(result).encode(), ContentType="application/json")
+def _write_timing(bucket, key, shard_id, start_dt, end_dt,
+                  total, positive, negative, correct, total_labeled):
+    exec_s = (end_dt - start_dt).total_seconds()
+    s3.put_object(
+        Bucket=bucket, Key=key,
+        Body=json.dumps({
+            "shard_id":         shard_id,
+            "start_time":       start_dt.isoformat(),
+            "end_time":         end_dt.isoformat(),
+            "execution_time_s": round(exec_s, 2),
+            "total":            total,
+            "positive":         positive,
+            "negative":         negative,
+            "correct":          correct,
+            "total_labeled":    total_labeled,
+        }).encode(),
+        ContentType="application/json",
+    )
 
 
 def _notify(callback_url, job_id, shard_id):

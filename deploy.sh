@@ -166,7 +166,7 @@ else
     --integration-uri "arn:aws:apigateway:${REGION}:lambda:path/2015-03-31/functions/${COORD_ARN}/invocations" \
     --region "$REGION" --output text --query 'IntegrationId')
 
-  for ROUTE_KEY in "POST /upload-url" "POST /job/start" "GET /job/status" \
+  for ROUTE_KEY in "POST /upload" "POST /upload-url" "POST /job/start" "GET /job/status" \
                    "GET /job/results" "POST /job/worker-done"; do
     aws apigatewayv2 create-route --api-id "$API_ID" \
       --route-key "$ROUTE_KEY" --target "integrations/$COORD_INT" \
