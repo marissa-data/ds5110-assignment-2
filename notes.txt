@@ -1,0 +1,14 @@
+Link to static website: http://ds5110-a2-frontend-175407131980.s3-website-us-east-1.amazonaws.com/
+
+This end-to-end pipeline for this IMDb Sentiment Analysis Task (starting at the frontend) shows a user an S3 static website, where they can upload a .csv or .parquet IMDb dataset,
+determine an appropriate shard size for the dataset size, and watch as the backend completes the task (with a live tracker displaying worker completion and coordinator timing
+(each request, the time that request took, and a timestamp), which mostly shows a status poll every 3 seconds the system is running. This website design is supported by 4 static files
+placed in an S3 website bucket.
+
+More towards the backend, the system places the user-uploaded data into an S3 data bucket, where it can be accessed by a coordinator lambda. Based on the user specifications, this 
+coordinator splits the data into shards (different datasets) for implementation across up to 5 different lambda workers. Each lambda worker (which live in a container) conducts sentiment
+analysis on its assigned shard using the DistilBERT model from HuggingFace. Once completed, results are sent to the frontend via an API Gateway (Lambda Function URLs were tried, but
+were blocked by AWS Learner Academy).
+
+Once the static website was deployed, I was able to conduct the experiments. I had the claude CLI complete Experiment 1
+ 
