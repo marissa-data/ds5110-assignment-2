@@ -135,9 +135,9 @@ deploy_lambda "$WORKER_NAME" /tmp/worker.zip 300 3008
 echo "==> Attaching ML layer + env to worker"
 aws lambda update-function-configuration \
   --function-name "$WORKER_NAME" \
-  --timeout 300 --memory-size 3008 \
+  --timeout 600 --memory-size 2048 \
   --layers "$ML_LAYER_ARN" \
-  --environment '{"Variables":{"ORT_THREADS":"2"}}' \
+  --environment '{"Variables":{"HF_HOME":"/tmp","TRANSFORMERS_CACHE":"/tmp/model","HF_HUB_DISABLE_XET":"1"}}' \
   --region "$REGION" --output text --query 'FunctionArn' >/dev/null
 aws lambda wait function-updated --function-name "$WORKER_NAME" --region "$REGION"
 

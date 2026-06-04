@@ -7,10 +7,17 @@ Writes two S3 objects per shard:
   outputs/{job_id}/timing/shard_XXXX.json   — timing + summary (for status polling)
 """
 
+import os
+
+# Redirect all HuggingFace/transformers cache to /tmp (only writable dir in Lambda).
+# HF_HUB_DISABLE_XET forces fallback from XetHub to regular HTTP download.
+os.environ.setdefault("HF_HOME", "/tmp")
+os.environ.setdefault("TRANSFORMERS_CACHE", "/tmp/model")
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
 import csv
 import io
 import json
-import os
 import urllib.request
 from datetime import datetime, timezone
 
